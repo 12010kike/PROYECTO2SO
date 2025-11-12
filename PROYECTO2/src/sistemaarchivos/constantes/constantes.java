@@ -17,5 +17,6 @@ public final class constantes {
     public static final int NUMERO_BLOQUES   = 200;   
     public static final String TEXTO_MODO_ADMIN = "Administrador";
     public static final String TEXTO_MODO_USUARIO = "Usuario";
+     public static final int PISTAS_DISCO = 200;
 }
 

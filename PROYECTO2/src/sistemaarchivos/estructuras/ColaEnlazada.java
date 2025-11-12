@@ -33,5 +33,13 @@ public class ColaEnlazada<T> {
 
     public boolean contiene(T v) {
         return lista.contiene(v);
-    }  
+    } 
+    public void recorrer(ListaEnlazada.Visitante<T> visitante) {
+        lista.recorrer(visitante);
+    }
+
+    public boolean removerPrimeraOcurrencia(T v) {
+        return lista.removerPrimeraOcurrencia(v);
+    }
+
 }
