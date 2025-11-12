@@ -11,6 +11,9 @@ import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
+import sistemaarchivos.EntradaSalida.GestorES;
+import sistemaarchivos.EntradaSalida.SolicitudES;
+import sistemaarchivos.EntradaSalida.TipoOperacionesES;
 import sistemaarchivos.disco.Disco;
 import sistemaarchivos.modelo.NodoArbolVista;
 import sistemaarchivos.sistema.GestorSistemaArchivos;
@@ -20,17 +23,24 @@ import sistemaarchivos.sistema.GestorSistemaArchivos;
  * @author eabdf
  */
 public class VentanaPrincipal extends JFrame {
-   private final JTree arbolSistema;
+  private final JTree arbolSistema;
     private final ModeloTablaAsignacion modeloAsignacion;
     private final JTable tablaAsignacion;
+    private final ModeloTablaColaES modeloColaES;
     private final JTable tablaColaES;
+
     private final JRadioButton radioAdmin;
     private final JRadioButton radioUsuario;
     private final JComboBox<PoliticaPlanificacion> comboPolitica;
 
     private final PanelDisco panelDisco;
     private final Disco disco;
-    private final GestorSistemaArchivos gestor;
+    private final GestorSistemaArchivos gestorFS;
+
+    // E/S
+    private final GestorES gestorES = new GestorES();
+    private final JLabel etiquetaMetricas = new JLabel("E/S: detenida | Recorrido: 0 | Espera prom.: 0 ms | Atendidas: 0");
+    private final JTextField campoCabezal = new JTextField("0", 4);
 
     public VentanaPrincipal() {
         super(constantes.TITULO_APLICACION);
@@ -38,9 +48,9 @@ public class VentanaPrincipal extends JFrame {
         setSize(constantes.ANCHO_VENTANA, constantes.ALTO_VENTANA);
         setLocationRelativeTo(null);
 
-        // Modelo
+        // Modelos base
         this.disco = Disco.crearPorDefecto();
-        this.gestor = new GestorSistemaArchivos(disco);
+        this.gestorFS = new GestorSistemaArchivos(disco);
 
         // Barra
         JToolBar barra = new JToolBar();
@@ -73,6 +83,18 @@ public class VentanaPrincipal extends JFrame {
         comboPolitica = new JComboBox<>(PoliticaPlanificacion.values());
         barra.add(comboPolitica);
 
+        // ---- Controles E/S ----
+        barra.addSeparator();
+        JButton btnAgregarES = new JButton("Agregar E/S");
+        JButton btnIniciarES = new JButton("Iniciar E/S");
+        JButton btnDetenerES = new JButton("Detener E/S");
+        barra.add(btnAgregarES);
+        barra.add(btnIniciarES);
+        barra.add(btnDetenerES);
+
+        barra.add(new JLabel(" Cabezal: "));
+        barra.add(campoCabezal);
+
         getContentPane().add(barra, BorderLayout.NORTH);
 
         // Árbol
@@ -90,41 +112,50 @@ public class VentanaPrincipal extends JFrame {
         tablaAsignacion = new JTable(modeloAsignacion);
         pestañas.addTab("Tabla de asignación", new JScrollPane(tablaAsignacion));
 
-        tablaColaES = new JTable(new javax.swing.table.DefaultTableModel(
-                new Object[][]{},
-                new String[]{"PID", "Operación", "Destino", "Pista/Sector"}
-        ));
+        modeloColaES = new ModeloTablaColaES();
+        tablaColaES = new JTable(modeloColaES);
         pestañas.addTab("Cola de E/S", new JScrollPane(tablaColaES));
 
         JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, scrollArbol, pestañas);
         split.setDividerLocation(320);
         getContentPane().add(split, BorderLayout.CENTER);
 
-        JLabel etiquetaEstado = new JLabel("Paso 2: CRUD básico y asignación encadenada.");
-        getContentPane().add(etiquetaEstado, BorderLayout.SOUTH);
+        getContentPane().add(etiquetaMetricas, BorderLayout.SOUTH);
 
         // Poblado inicial
         refrescarVista();
 
-        // Acciones
+        // Acciones FS
         btnCrearDir.addActionListener(e -> accionCrearDirectorio());
         btnCrearArch.addActionListener(e -> accionCrearArchivo());
         btnEliminar.addActionListener(e -> accionEliminar());
 
-        btnGuardar.addActionListener(e -> JOptionPane.showMessageDialog(this,
-                "Guardar JSON (se implementará en paso de Persistencia)"));
-        btnCargar.addActionListener(e -> JOptionPane.showMessageDialog(this,
-                "Cargar JSON (se implementará en paso de Persistencia)"));
+        // Persistencia (se implementa en PASO 5)
+        btnGuardar.addActionListener(e -> JOptionPane.showMessageDialog(this, "Guardar JSON estará disponible en PASO 5."));
+        btnCargar.addActionListener(e -> JOptionPane.showMessageDialog(this, "Cargar JSON estará disponible en PASO 5."));
+
+        // Acciones E/S
+        btnAgregarES.addActionListener(e -> accionAgregarES());
+        btnIniciarES.addActionListener(e -> accionIniciarES());
+        btnDetenerES.addActionListener(e -> accionDetenerES());
+
+        // Timer UI para refrescar cola y métricas sin bloquear EDT
+        new javax.swing.Timer(400, e -> {
+            modeloColaES.actualizarDesdeGestor(gestorES);
+            etiquetaMetricas.setText("E/S: "
+                    + (gestorES.getSolicitudesAtendidas() >= 0 ? "activa" : "detenida")
+                    + " | Recorrido: " + gestorES.getRecorridoTotal()
+                    + " | Espera prom.: " + gestorES.getEsperaPromedioMs() + " ms"
+                    + " | Atendidas: " + gestorES.getSolicitudesAtendidas());
+        }).start();
     }
 
+    // ----------- Acciones FS (idénticas al PASO 2) -----------
     private void refrescarVista() {
-        // Actualiza árbol
-        DefaultMutableTreeNode raizUI = construirNodoUI(gestor.getRaiz());
+        DefaultMutableTreeNode raizUI = construirNodoUI(gestorFS.getRaiz());
         arbolSistema.setModel(new DefaultTreeModel(raizUI));
-        // Actualiza disco
         panelDisco.repaint();
-        // Actualiza tabla de asignación
-        modeloAsignacion.actualizarDesdeRaiz(gestor.getRaiz());
+        modeloAsignacion.actualizarDesdeRaiz(gestorFS.getRaiz());
     }
 
     private DefaultMutableTreeNode construirNodoUI(sistemaarchivos.sistema.NodoSistema n) {
@@ -139,7 +170,6 @@ public class VentanaPrincipal extends JFrame {
         var path = arbolSistema.getSelectionPath();
         if (path == null) return "raiz";
         Object[] comps = path.getPath();
-        // construir ruta tipo "raiz/subdir/otro"
         String ruta = "";
         for (int i = 0; i < comps.length; i++) {
             ruta += comps[i].toString();
@@ -155,10 +185,8 @@ public class VentanaPrincipal extends JFrame {
         }
         String nombre = JOptionPane.showInputDialog(this, "Nombre del directorio:");
         if (nombre == null || nombre.isBlank()) return;
-        boolean ok = gestor.crearDirectorio(rutaSeleccionada(), nombre.trim(), "admin");
-        if (!ok) {
-            JOptionPane.showMessageDialog(this, "No se pudo crear el directorio (ruta inválida o ya existe).");
-        }
+        boolean ok = gestorFS.crearDirectorio(rutaSeleccionada(), nombre.trim(), "admin");
+        if (!ok) JOptionPane.showMessageDialog(this, "No se pudo crear el directorio.");
         refrescarVista();
     }
 
@@ -169,25 +197,17 @@ public class VentanaPrincipal extends JFrame {
         }
         JTextField campoNombre = new JTextField();
         JTextField campoBloques = new JTextField();
-        Object[] msg = {
-                "Nombre del archivo:", campoNombre,
-                "Tamaño (en bloques):", campoBloques
-        };
+        Object[] msg = {"Nombre del archivo:", campoNombre, "Tamaño (en bloques):", campoBloques};
         int r = JOptionPane.showConfirmDialog(this, msg, "Crear archivo", JOptionPane.OK_CANCEL_OPTION);
         if (r != JOptionPane.OK_OPTION) return;
 
         String nombre = campoNombre.getText();
         int tam;
-        try {
-            tam = Integer.parseInt(campoBloques.getText());
-        } catch (NumberFormatException ex) {
-            JOptionPane.showMessageDialog(this, "Ingrese un tamaño válido (entero > 0).");
-            return;
+        try { tam = Integer.parseInt(campoBloques.getText()); } catch (NumberFormatException ex) {
+            JOptionPane.showMessageDialog(this, "Ingrese un tamaño válido (>0)."); return;
         }
-        boolean ok = gestor.crearArchivo(rutaSeleccionada(), nombre.trim(), "admin", tam);
-        if (!ok) {
-            JOptionPane.showMessageDialog(this, "No se pudo crear el archivo (espacio insuficiente o conflicto de nombre).");
-        }
+        boolean ok = gestorFS.crearArchivo(rutaSeleccionada(), nombre.trim(), "admin", tam);
+        if (!ok) JOptionPane.showMessageDialog(this, "No se pudo crear el archivo.");
         refrescarVista();
     }
 
@@ -198,14 +218,12 @@ public class VentanaPrincipal extends JFrame {
         }
         var path = arbolSistema.getSelectionPath();
         if (path == null || path.getPathCount() <= 1) {
-            JOptionPane.showMessageDialog(this, "Seleccione un archivo o directorio (no la raíz).");
-            return;
+            JOptionPane.showMessageDialog(this, "Seleccione un archivo o directorio (no la raíz)."); return;
         }
         String nombre = path.getLastPathComponent().toString();
         String rutaPadre = construirRutaPadre(path.getPath());
-        // intentar eliminar archivo; si no, directorio
-        boolean ok = gestor.eliminarArchivo(rutaPadre, nombre);
-        if (!ok) ok = gestor.eliminarDirectorioRecursivo(rutaPadre, nombre);
+        boolean ok = gestorFS.eliminarArchivo(rutaPadre, nombre);
+        if (!ok) ok = gestorFS.eliminarDirectorioRecursivo(rutaPadre, nombre);
         if (!ok) JOptionPane.showMessageDialog(this, "No se pudo eliminar.");
         refrescarVista();
     }
@@ -219,10 +237,46 @@ public class VentanaPrincipal extends JFrame {
         return ruta.isEmpty() ? "raiz" : ruta;
     }
 
+    // ----------- Acciones E/S -----------
+    private void accionAgregarES() {
+        JTextField campoPid = new JTextField();
+        JComboBox<TipoOperacionesES> comboTipo = new JComboBox<>(TipoOperacionesES.values());
+        JTextField campoPista = new JTextField();
+        Object[] msg = {
+                "PID:", campoPid,
+                "Tipo:", comboTipo,
+                "Pista destino (0-" + (constantes.PISTAS_DISCO - 1) + "):", campoPista
+        };
+        int r = JOptionPane.showConfirmDialog(this, msg, "Agregar solicitud E/S", JOptionPane.OK_CANCEL_OPTION);
+        if (r != JOptionPane.OK_OPTION) return;
+
+        int pista;
+        try { pista = Integer.parseInt(campoPista.getText()); } catch (NumberFormatException ex) {
+            JOptionPane.showMessageDialog(this, "Pista inválida."); return;
+        }
+        if (pista < 0 || pista >= constantes.PISTAS_DISCO) {
+            JOptionPane.showMessageDialog(this, "Pista fuera de rango."); return;
+        }
+        SolicitudES s = new SolicitudES(campoPid.getText().trim(), (TipoOperacionesES) comboTipo.getSelectedItem(), pista);
+        gestorES.encolar(s);
+        modeloColaES.actualizarDesdeGestor(gestorES);
+    }
+
+    private void accionIniciarES() {
+        int pos;
+        try { pos = Integer.parseInt(campoCabezal.getText().trim()); } catch (NumberFormatException ex) { pos = 0; }
+        gestorES.configurarCabezal(pos, constantes.PISTAS_DISCO - 1);
+        gestorES.iniciar();
+    }
+
+    private void accionDetenerES() {
+        gestorES.detener();
+    }
+
+    // ---- Utilidades GUI ----
     public ModoUsuario obtenerModoActual() {
         return radioAdmin.isSelected() ? ModoUsuario.ADMINISTRADOR : ModoUsuario.USUARIO;
     }
-
     public PoliticaPlanificacion obtenerPoliticaSeleccionada() {
         return (PoliticaPlanificacion) comboPolitica.getSelectedItem();
     }

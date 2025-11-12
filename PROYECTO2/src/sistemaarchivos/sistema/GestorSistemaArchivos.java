@@ -14,22 +14,24 @@ import sistemaarchivos.modelo.Permisos;
  * @author eabdf
  */
 public final class GestorSistemaArchivos {
-    private final Disco disco;
-    private final Directorio raiz;
+     private final Disco disco;
+    private Directorio raiz;
 
     public GestorSistemaArchivos(Disco disco) {
         this.disco = disco;
         this.raiz = new Directorio("raiz", "admin", Permisos.porDefectoDirectorio());
-        // Directorios base
         Directorio sistema = new Directorio("sistema", "admin", Permisos.porDefectoDirectorio());
         Directorio usuarios = new Directorio("usuarios", "admin", Permisos.porDefectoDirectorio());
         raiz.agregarHijo(sistema);
         raiz.agregarHijo(usuarios);
     }
 
-    public Directorio getRaiz() {
-        return raiz;
+    public Directorio getRaiz() { return raiz; }
+    
+    public void reemplazarRaiz(Directorio nuevaRaiz) {
+        if (nuevaRaiz != null) this.raiz = nuevaRaiz;
     }
+    
 
     // ------- UTILIDAD PARA BUSCAR DIRECTORIO POR RUTA SIMPLE "raiz/usuarios" -------
     public Directorio obtenerDirectorioPorRuta(String ruta) {
