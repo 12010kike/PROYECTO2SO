@@ -5,6 +5,12 @@
 package sistemaarchivos.EntradaSalida;
 
 import java.util.concurrent.Semaphore;
+import sistemaarchivos.Planificacion.PlanificadorCScan;
+import sistemaarchivos.Planificacion.PlanificadorDisco;
+import sistemaarchivos.Planificacion.PlanificadorFIFO;
+import sistemaarchivos.Planificacion.PlanificadorSCAN;
+import sistemaarchivos.Planificacion.PlanificadorSSTF;
+import sistemaarchivos.Planificacion.PoliticaPlanificacion;
 import sistemaarchivos.constantes.constantes;
 import sistemaarchivos.estructuras.ColaEnlazada;
 
@@ -13,7 +19,7 @@ import sistemaarchivos.estructuras.ColaEnlazada;
  * @author eabdf
  */
 public final class GestorES {
-   private final ColaEnlazada<SolicitudES> cola = new ColaEnlazada<>();
+  private final ColaEnlazada<SolicitudES> cola = new ColaEnlazada<>();
     private final Semaphore semElementos = new Semaphore(0, true);
     private final Object candadoCola = new Object();
 
@@ -23,29 +29,39 @@ public final class GestorES {
     private int posicionCabezal = 0;
     private int maxPistas = constantes.PISTAS_DISCO - 1;
 
-   
+    // métricas
     private long solicitudesAtendidas = 0;
-    private long recorridoTotal = 0; // en unidades de pista
+    private long recorridoTotal = 0;
     private long esperaAcumuladaMs = 0;
 
-  
+    private PoliticaPlanificacion politica = PoliticaPlanificacion.FIFO;
+    private PlanificadorDisco planificador = new PlanificadorFIFO();
+
+   
     public void configurarCabezal(int pos, int max) {
         if (pos < 0) pos = 0;
         this.posicionCabezal = Math.min(pos, max);
         this.maxPistas = max;
     }
 
-    public int getPosicionCabezal() { return posicionCabezal; }
-    public int getMaxPistas() { return maxPistas; }
+    public void setPolitica(PoliticaPlanificacion p) {
+        this.politica = p;
+        switch (p) {
+            case FIFO -> planificador = new PlanificadorFIFO();
+            case SSTF -> planificador = new PlanificadorSSTF();
+            case SCAN -> planificador = new PlanificadorSCAN();
+            case C_SCAN -> planificador = new PlanificadorCScan();
+        }
+    }
 
+   
     public void encolar(SolicitudES s) {
         s.marcarEncolado();
-        synchronized (candadoCola) {
-            cola.ofrecer(s);
-        }
+        synchronized (candadoCola) { cola.ofrecer(s); }
         semElementos.release();
     }
 
+  
     public void iniciar() {
         if (ejecutando) return;
         ejecutando = true;
@@ -59,18 +75,15 @@ public final class GestorES {
         if (hilo != null) hilo.interrupt();
     }
 
-    
+  
     public long getSolicitudesAtendidas() { return solicitudesAtendidas; }
     public long getRecorridoTotal() { return recorridoTotal; }
-    public long getEsperaPromedioMs() {
-        return solicitudesAtendidas == 0 ? 0 : esperaAcumuladaMs / solicitudesAtendidas;
-    }
+    public long getEsperaPromedioMs() { return solicitudesAtendidas == 0 ? 0 : esperaAcumuladaMs / solicitudesAtendidas; }
+    public int getPosicionCabezal() { return posicionCabezal; }
+    public int getMaxPistas() { return maxPistas; }
 
-   
-    public int tamanoCola() {
-        synchronized (candadoCola) { return cola.tamano(); }
-    }
-
+  
+    public int tamanoCola() { synchronized (candadoCola) { return cola.tamano(); } }
     public void volcarTabla(Object[][] destino) {
         synchronized (candadoCola) {
             final int[] k = {0};
@@ -86,19 +99,16 @@ public final class GestorES {
         }
     }
 
-    
+  
     private void bucleAtencion() {
         while (ejecutando) {
-            try {
-                semElementos.acquire();
-            } catch (InterruptedException ie) {
-                if (!ejecutando) break;
-            }
+            try { semElementos.acquire(); } catch (InterruptedException ie) { if (!ejecutando) break; }
             if (!ejecutando) break;
 
             SolicitudES s;
             synchronized (candadoCola) {
-                s = cola.retirar();
+                planificador.configurar(posicionCabezal, 0, maxPistas);
+                s = planificador.seleccionarSiguiente(cola);
             }
             if (s == null) continue;
 
@@ -107,18 +117,12 @@ public final class GestorES {
             int movimiento = Math.abs(destino - posicionCabezal);
             recorridoTotal += movimiento;
 
-            
-            try {
-                // 1 ms por pista movida + 5 ms de servicio base
-                Thread.sleep(Math.max(0, movimiento) + 5L);
-            } catch (InterruptedException ignored) {}
-
+            try { Thread.sleep(Math.max(0, movimiento) + 5L); } catch (InterruptedException ignored) {}
             posicionCabezal = destino;
             s.marcarFin();
 
-            // métricas
             esperaAcumuladaMs += s.getEsperaMs();
             solicitudesAtendidas++;
         }
-    } 
+    }
 }
