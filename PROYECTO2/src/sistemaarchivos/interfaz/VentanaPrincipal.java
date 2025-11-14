@@ -135,21 +135,20 @@ public class VentanaPrincipal extends JFrame {
         btnCrearArch.addActionListener(e -> accionCrearArchivo());
         btnEliminar.addActionListener(e -> accionEliminar());
 
-        // Persistencia (PASO 5; aquí solo aviso)
-        btnGuardar.addActionListener(e ->
-                JOptionPane.showMessageDialog(this, "Guardar JSON estará disponible en el PASO 5."));
-        btnCargar.addActionListener(e ->
-                JOptionPane.showMessageDialog(this, "Cargar JSON estará disponible en el PASO 5."));
-
-        // ---- Acciones E/S ----
+        // Ahora (funcional)
+        btnGuardar.addActionListener(e -> accionGuardarJSON());
+        btnCargar.addActionListener(e -> accionCargarJSON());
+        
+// ---- Acciones E/S ----
         btnAgregarES.addActionListener(e -> accionAgregarES());
         btnIniciarES.addActionListener(e -> accionIniciarES());
         btnDetenerES.addActionListener(e -> accionDetenerES());
 
         // Política seleccionable (aplica al GestorES)
         comboPolitica.addActionListener(e -> {
-            PoliticaPlanificacion p = (PoliticaPlanificacion) comboPolitica.getSelectedItem();
-            gestorES.setPolitica(p);
+            PoliticaPlanificacion p =
+                (PoliticaPlanificacion) comboPolitica.getSelectedItem();
+        gestorES.setPolitica(p);
         });
 
         // Timer UI para refrescar cola y métricas sin bloquear EDT
@@ -279,14 +278,19 @@ public class VentanaPrincipal extends JFrame {
     }
 
     private void accionIniciarES() {
-        int pos;
-        try { pos = Integer.parseInt(campoCabezal.getText().trim()); } catch (NumberFormatException ex) { pos = 0; }
-        gestorES.configurarCabezal(pos, constantes.PISTAS_DISCO - 1);
-        // aplica política actual del combo
-        PoliticaPlanificacion p = (PoliticaPlanificacion) comboPolitica.getSelectedItem();
-        gestorES.setPolitica(p);
-        gestorES.iniciar();
-    }
+    int pos;
+    try { pos = Integer.parseInt(campoCabezal.getText().trim()); }
+    catch (NumberFormatException ex) { pos = 0; }
+
+    // 1) fija posición y límites
+    gestorES.configurarCabezal(pos, sistemaarchivos.constantes.constantes.PISTAS_DISCO - 1);
+
+    // 2) aplica la política seleccionada EN ESTE MOMENTO
+    gestorES.setPolitica((PoliticaPlanificacion) comboPolitica.getSelectedItem());
+
+    // 3) arranca el hilo
+    gestorES.iniciar();
+}
 
     private void accionDetenerES() {
         gestorES.detener();
@@ -300,4 +304,69 @@ public class VentanaPrincipal extends JFrame {
     public PoliticaPlanificacion obtenerPoliticaSeleccionada() {
         return (PoliticaPlanificacion) comboPolitica.getSelectedItem();
     }
+    
+    private void accionGuardarJSON() {
+    javax.swing.JFileChooser fc = new javax.swing.JFileChooser();
+    fc.setDialogTitle("Guardar estado en JSON");
+    if (fc.showSaveDialog(this) == javax.swing.JFileChooser.APPROVE_OPTION) {
+        try {
+            // volcar cola (snapshot) a arreglo
+            int n = gestorES.tamanoCola();
+            Object[][] tabla = new Object[n][4];
+            gestorES.volcarTabla(tabla);
+            SolicitudES[] arr = new SolicitudES[n];
+            for (int i = 0; i < n; i++) {
+                String pid = String.valueOf(tabla[i][0]);
+                TipoOperacionesES tipo = TipoOperacionesES.valueOf(String.valueOf(tabla[i][1]));
+                int pista = Integer.parseInt(String.valueOf(tabla[i][2]));
+                arr[i] = new SolicitudES(pid, tipo, pista);
+            }
+            String json = sistemaarchivos.persistencia.PersistenciaJSON.exportarEstado(
+                    disco,
+                    gestorFS.getRaiz(),
+                    arr,
+                    obtenerPoliticaSeleccionada().name(),
+                    gestorES.getPosicionCabezal()
+            );
+            sistemaarchivos.persistencia.PersistenciaJSON.guardarEnArchivo(fc.getSelectedFile().toPath(), json);
+            javax.swing.JOptionPane.showMessageDialog(this, "Estado guardado.");
+        } catch (Exception ex) {
+            javax.swing.JOptionPane.showMessageDialog(this, "Error al guardar: " + ex.getMessage());
+        }
+    }
+}
+
+private void accionCargarJSON() {
+    javax.swing.JFileChooser fc = new javax.swing.JFileChooser();
+    fc.setDialogTitle("Cargar estado desde JSON");
+    if (fc.showOpenDialog(this) == javax.swing.JFileChooser.APPROVE_OPTION) {
+        try {
+            var res = sistemaarchivos.persistencia.PersistenciaJSON.cargarDesdeArchivo(fc.getSelectedFile().toPath());
+
+            // Disco
+            this.disco = res.disco;
+            this.panelDisco.setDisco(this.disco);
+
+            // FS
+            this.gestorFS.reemplazarRaiz(res.raiz);
+
+            // Cola E/S
+            for (int i = 0; i < res.cola.length; i++) {
+                this.gestorES.encolar(res.cola[i]);
+            }
+
+            // Política y cabezal
+            this.comboPolitica.setSelectedItem(sistemaarchivos.Planificacion.PoliticaPlanificacion.valueOf(res.politica));
+            this.gestorES.setPolitica(sistemaarchivos.Planificacion.PoliticaPlanificacion.valueOf(res.politica));
+            this.campoCabezal.setText(String.valueOf(res.posCabezal));
+            this.gestorES.configurarCabezal(res.posCabezal, constantes.PISTAS_DISCO - 1);
+
+            refrescarVista();
+            this.modeloColaES.actualizarDesdeGestor(gestorES);
+            javax.swing.JOptionPane.showMessageDialog(this, "Estado cargado.");
+        } catch (Exception ex) {
+            javax.swing.JOptionPane.showMessageDialog(this, "Error al cargar: " + ex.getMessage());
+        }
+    }
+}
 }

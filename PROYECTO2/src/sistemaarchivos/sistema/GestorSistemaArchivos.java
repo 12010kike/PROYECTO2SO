@@ -28,7 +28,7 @@ public final class GestorSistemaArchivos {
 
     public Directorio getRaiz() { return raiz; }
     
-    public void reemplazarRaiz(Directorio nuevaRaiz) {
+    public void reemplazarRaiz(sistemaarchivos.sistema.Directorio nuevaRaiz) {
         if (nuevaRaiz != null) this.raiz = nuevaRaiz;
     }
     
