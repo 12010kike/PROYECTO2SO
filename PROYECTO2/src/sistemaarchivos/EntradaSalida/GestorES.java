@@ -20,7 +20,7 @@ import sistemaarchivos.estructuras.ColaEnlazada;
  */
 public final class GestorES {
 
-    // ----------------- Cola y sincronización -----------------
+ // ----------------- Cola y sincronización -----------------
     private final ColaEnlazada<SolicitudES> cola = new ColaEnlazada<>();
     private final Object candadoCola = new Object();
     private final Semaphore semElementos = new Semaphore(0, true);
@@ -31,7 +31,7 @@ public final class GestorES {
 
     // ----------------- Hilo de trabajo -----------------
     private volatile boolean ejecutando = false;
-    private Thread hilo;
+    private volatile Thread hilo;
 
     // ----------------- Estado del disco / métricas -----------------
     private int posicionCabezal = 0;
@@ -41,11 +41,12 @@ public final class GestorES {
     private long solicitudesAtendidas = 0;
     private long esperaAcumuladaMs = 0;
 
-    // ==============================================================
+    // ============================================================== //
     // API pública consultada por la GUI
-    // ==============================================================
+    // ============================================================== //
 
-    /** Encola una solicitud y despierta al hilo si estaba esperando. */
+    /** Encola una solicitud y despierta al hilo si estaba esperando.
+     * @param s */
     public void encolar(SolicitudES s) {
         if (s == null) return;
         synchronized (candadoCola) {
@@ -54,12 +55,14 @@ public final class GestorES {
         semElementos.release();
     }
 
-    /** Tamaño actual de la cola. */
+    /** Tamaño actual de la cola.
+     * @return  */
     public int tamanoCola() {
         synchronized (candadoCola) { return cola.tamano(); }
     }
 
-    /** Vuelca un snapshot de la cola a una tabla para la GUI (PID, Tipo, Pista, Espera). */
+    /** Vuelca un snapshot de la cola a una tabla para la GUI (PID, Tipo, Pista, Espera).
+     * @param tabla */
     public void volcarTabla(Object[][] tabla) {
         synchronized (candadoCola) {
             final int[] fila = {0};
@@ -68,7 +71,7 @@ public final class GestorES {
                     tabla[fila[0]][0] = s.getIdProceso();
                     tabla[fila[0]][1] = s.getTipo().name();
                     tabla[fila[0]][2] = s.getPistaDestino();
-                    tabla[fila[0]][3] = s.getEsperaMs(); // la solicitud calcula su espera
+                    tabla[fila[0]][3] = s.getEsperaMs();
                 }
                 fila[0]++;
             });
@@ -81,7 +84,15 @@ public final class GestorES {
     public long getEsperaPromedioMs()     { return (solicitudesAtendidas == 0) ? 0 : (esperaAcumuladaMs / solicitudesAtendidas); }
     public int  getPosicionCabezal()      { return posicionCabezal; }
 
-    /** Cambia la política y deja el planificador listo con el estado actual. */
+    /** ¿El hilo está corriendo? Úsalo para la UI.
+     * @return  */
+    public boolean estaEjecutando() {
+        Thread t = this.hilo;
+        return ejecutando && t != null && t.isAlive();
+    }
+
+    /** Cambia la política y deja el planificador listo con el estado actual.
+     * @param p */
     public void setPolitica(PoliticaPlanificacion p) {
         this.politica = p;
         switch (p) {
@@ -95,7 +106,9 @@ public final class GestorES {
         }
     }
 
-    /** Posición inicial del cabezal y cota superior de pistas. */
+    /** Posición inicial del cabezal y cota superior de pistas.
+     * @param pos
+     * @param pistaMax */
     public void configurarCabezal(int pos, int pistaMax) {
         this.maxPistas = Math.max(0, pistaMax);
         this.posicionCabezal = Math.max(0, Math.min(pos, this.maxPistas));
@@ -106,28 +119,33 @@ public final class GestorES {
 
     /** Inicia el hilo de atención. */
     public void iniciar() {
-        if (hilo != null && hilo.isAlive()) return;
+        if (estaEjecutando()) return;
         ejecutando = true;
         hilo = new Thread(this::bucleAtencion, "Hilo-ES");
         hilo.setDaemon(true);
         hilo.start();
     }
 
-    /** Detiene el hilo de atención de forma segura. */
+    /** Detiene el hilo de atención de forma segura (fix). */
     public void detener() {
         ejecutando = false;
-        // libera al hilo si está en acquire()
+        // Desbloquear acquire() y forzar salida del sleep si lo hubiera
         semElementos.release();
-        try { if (hilo != null) hilo.join(200); } catch (InterruptedException ignored) {}
+        Thread t = hilo;
+        if (t != null) {
+            t.interrupt();
+            try { t.join(300); } catch (InterruptedException ignored) {}
+        }
+        hilo = null; // estado limpio para que iniciar() funcione de nuevo
     }
 
-    // ==============================================================
-    // BUCLE DEL HILO: selección por planificador + simulación de movimiento
-    // ==============================================================
+    // ============================================================== //
+    // Bucle del hilo: selección por planificador + simulación de movimiento
+    // ============================================================== //
     private void bucleAtencion() {
         while (ejecutando) {
             try {
-                semElementos.acquire();                 // espera a que haya al menos 1 solicitud
+                semElementos.acquire();
             } catch (InterruptedException ie) {
                 if (!ejecutando) break;
             }
@@ -135,10 +153,9 @@ public final class GestorES {
 
             SolicitudES s;
             synchronized (candadoCola) {
-                if (cola.estaVacia()) continue;         // carrera rara: nada que hacer
-                // ¡Clave! Configurar con la posición actual ANTES de seleccionar
+                if (cola.estaVacia()) continue;
                 planificador.configurar(posicionCabezal, 0, maxPistas);
-                s = planificador.seleccionarSiguiente(cola); // el planificador REMUEVE la elegida
+                s = planificador.seleccionarSiguiente(cola); // quita de la cola
             }
             if (s == null) continue;
 
@@ -148,8 +165,9 @@ public final class GestorES {
             int movimiento = Math.abs(destino - posicionCabezal);
             recorridoTotal += movimiento;
 
-            // Simula tiempo de búsqueda: >=10ms y proporcional al movimiento
-            try { Thread.sleep(Math.max(10, movimiento)); } catch (InterruptedException ignored) {}
+            try { Thread.sleep(Math.max(10, movimiento)); } catch (InterruptedException ignored) {
+                if (!ejecutando) break;
+            }
 
             posicionCabezal = destino;
 
@@ -159,4 +177,3 @@ public final class GestorES {
         }
     }
 }
-
