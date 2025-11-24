@@ -323,6 +323,14 @@ public class VentanaPrincipal extends JFrame {
         btnIniciarESRef.setEnabled(false);
         btnDetenerESRef.setEnabled(true);
     }
+    private int leerCabezalUI() {
+    int p;
+    try { p = Integer.parseInt(campoCabezal.getText().trim()); }
+    catch (NumberFormatException ex) { p = gestorES.getPosicionCabezal(); } // respaldo
+    if (p < 0) p = 0;
+    if (p >= constantes.PISTAS_DISCO) p = constantes.PISTAS_DISCO - 1;
+    return p;
+}
 
     private void accionDetenerES() {
          // 1) detener el hilo
@@ -355,36 +363,59 @@ public class VentanaPrincipal extends JFrame {
         return (PoliticaPlanificacion) comboPolitica.getSelectedItem();
     }
 
-    // ================== JSON (PASO 5) ==================
+    
     private void accionGuardarJSON() {
-        JFileChooser fc = new JFileChooser();
-        fc.setDialogTitle("Guardar estado en JSON");
-        if (fc.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
-            try {
-                int n = gestorES.tamanoCola();
-                Object[][] tabla = new Object[n][4];
-                gestorES.volcarTabla(tabla);
-                SolicitudES[] arr = new SolicitudES[n];
-                for (int i = 0; i < n; i++) {
-                    String pid = String.valueOf(tabla[i][0]);
-                    TipoOperacionesES tipo = TipoOperacionesES.valueOf(String.valueOf(tabla[i][1]));
-                    int pista = Integer.parseInt(String.valueOf(tabla[i][2]));
-                    arr[i] = new SolicitudES(pid, tipo, pista);
-                }
-                String json = PersistenciaJSON.exportarEstado(
-                        disco,
-                        gestorFS.getRaiz(),
-                        arr,
-                        obtenerPoliticaSeleccionada().name(),
-                        gestorES.getPosicionCabezal()
-                );
-                PersistenciaJSON.guardarEnArchivo(fc.getSelectedFile().toPath(), json);
-                JOptionPane.showMessageDialog(this, "Estado guardado.");
-            } catch (Exception ex) {
-                JOptionPane.showMessageDialog(this, "Error al guardar: " + ex.getMessage());
+    JFileChooser fc = new JFileChooser();
+    fc.setDialogTitle("Guardar estado en JSON");
+    if (fc.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+        try {
+            // 1) Snapshot de la cola de E/S
+            int n = gestorES.tamanoCola();
+            Object[][] tabla = new Object[n][4];
+            gestorES.volcarTabla(tabla);
+            SolicitudES[] arr = new SolicitudES[n];
+            for (int i = 0; i < n; i++) {
+                String pid = String.valueOf(tabla[i][0]);
+                TipoOperacionesES tipo = TipoOperacionesES.valueOf(String.valueOf(tabla[i][1]));
+                int pista = Integer.parseInt(String.valueOf(tabla[i][2]));
+                arr[i] = new SolicitudES(pid, tipo, pista);
             }
+
+            // 2) Posición de cabezal tomada desde la UI (validada)
+            int posParaGuardar;
+            try {
+                posParaGuardar = Integer.parseInt(campoCabezal.getText().trim());
+            } catch (NumberFormatException ex) {
+                posParaGuardar = gestorES.getPosicionCabezal(); // respaldo
+            }
+            if (posParaGuardar < 0) posParaGuardar = 0;
+            if (posParaGuardar >= constantes.PISTAS_DISCO) {
+                posParaGuardar = constantes.PISTAS_DISCO - 1;
+            }
+
+            // 3) Construcción del JSON
+            String json = PersistenciaJSON.exportarEstado(
+                    disco,
+                    gestorFS.getRaiz(),
+                    arr,
+                    obtenerPoliticaSeleccionada().name(),
+                    posParaGuardar
+            );
+
+            // 4) Guardar a archivo (forzar .json si falta)
+            java.io.File archivo = fc.getSelectedFile();
+            if (!archivo.getName().toLowerCase().endsWith(".json")) {
+                archivo = new java.io.File(archivo.getParentFile(), archivo.getName() + ".json");
+            }
+            PersistenciaJSON.guardarEnArchivo(archivo.toPath(), json);
+
+            JOptionPane.showMessageDialog(this, "Estado guardado en: " + archivo.getName());
+        } catch (HeadlessException | IOException | NumberFormatException ex) {
+            JOptionPane.showMessageDialog(this, "Error al guardar: " + ex.getMessage());
         }
     }
+}
+
 
     private void accionCargarJSON() {
         JFileChooser fc = new JFileChooser();
