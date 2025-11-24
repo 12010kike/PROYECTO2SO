@@ -14,26 +14,29 @@ import sistemaarchivos.modelo.Permisos;
  * @author eabdf
  */
 public final class GestorSistemaArchivos {
-     private final Disco disco;
+   private final Disco disco;
     private Directorio raiz;
 
     public GestorSistemaArchivos(Disco disco) {
         this.disco = disco;
         this.raiz = new Directorio("raiz", "admin", Permisos.porDefectoDirectorio());
-        Directorio sistema = new Directorio("sistema", "admin", Permisos.porDefectoDirectorio());
+        Directorio sistema  = new Directorio("sistema",  "admin", Permisos.porDefectoDirectorio());
         Directorio usuarios = new Directorio("usuarios", "admin", Permisos.porDefectoDirectorio());
         raiz.agregarHijo(sistema);
         raiz.agregarHijo(usuarios);
     }
 
     public Directorio getRaiz() { return raiz; }
-    
-    public void reemplazarRaiz(sistemaarchivos.sistema.Directorio nuevaRaiz) {
+
+    /** Reemplaza la raíz (se usa al cargar JSON).
+     * @param nuevaRaiz */
+    public void reemplazarRaiz(Directorio nuevaRaiz) {
         if (nuevaRaiz != null) this.raiz = nuevaRaiz;
     }
-    
 
-    // ------- UTILIDAD PARA BUSCAR DIRECTORIO POR RUTA SIMPLE "raiz/usuarios" -------
+    // =========================================================
+    //   BÚSQUEDA DE DIRECTORIO POR RUTA "raiz/usuarios/..."
+    // =========================================================
     public Directorio obtenerDirectorioPorRuta(String ruta) {
         if (ruta == null || ruta.isEmpty() || "raiz".equals(ruta)) return raiz;
         String[] partes = dividirRuta(ruta);
@@ -50,7 +53,7 @@ public final class GestorSistemaArchivos {
     }
 
     private String[] dividirRuta(String ruta) {
-        // no usar String.split con regex complejos; la forma básica es suficiente aquí
+        // Sin java.util. Construimos a mano.
         ListaEnlazada<String> partes = new ListaEnlazada<>();
         String acum = "";
         for (int i = 0; i < ruta.length(); i++) {
@@ -72,7 +75,9 @@ public final class GestorSistemaArchivos {
         return arr;
     }
 
-    // -------------------- CRUD DIRECTORIO --------------------
+    // =========================================================
+    //                       CRUD DIRECTORIO
+    // =========================================================
     public boolean crearDirectorio(String rutaPadre, String nombre, String propietario) {
         Directorio padre = obtenerDirectorioPorRuta(rutaPadre);
         if (padre == null) return false;
@@ -88,7 +93,7 @@ public final class GestorSistemaArchivos {
         if (padre == null) return false;
         NodoSistema candidato = padre.obtenerHijoPorNombre(nombre);
         if (candidato instanceof Directorio d) {
-            // liberar archivos recursivamente
+            // liberar archivos recursivamente antes de eliminar
             liberarArchivosRecursivo(d);
             return padre.eliminarHijoPorNombre(nombre);
         }
@@ -96,7 +101,7 @@ public final class GestorSistemaArchivos {
     }
 
     private void liberarArchivosRecursivo(Directorio dir) {
-        // eliminar hijos: si archivo -> liberar cadena, si directorio -> bajar
+        // Borrado postorden: si archivo -> liberar cadena; si directorio -> bajar
         ListaEnlazada<NodoSistema> hijos = dir.getHijos();
         final ListaEnlazada<String> aEliminar = new ListaEnlazada<>();
         hijos.recorrer((n, i) -> {
@@ -108,11 +113,13 @@ public final class GestorSistemaArchivos {
                 aEliminar.agregarAlFinal(sub.getNombre());
             }
         });
-        // borrar marcados por nombre
+        // Eliminar marcados
         aEliminar.recorrer((nombre, i) -> dir.eliminarHijoPorNombre(nombre));
     }
 
-    // -------------------- CRUD ARCHIVO --------------------
+    // =========================================================
+    //                        CRUD ARCHIVO
+    // =========================================================
     public boolean crearArchivo(String rutaPadre, String nombre, String propietario, int bloquesSolicitados) {
         if (bloquesSolicitados <= 0) return false;
         Directorio padre = obtenerDirectorioPorRuta(rutaPadre);
@@ -138,51 +145,73 @@ public final class GestorSistemaArchivos {
         return false;
     }
 
-    // -------------------- ASIGNACIÓN ENCANDENADA (FAT SIMPLE) --------------------
+    // =========================================================
+    //                          RENOMBRAR
+    // =========================================================
     /**
-     * Asigna 'cantidad' bloques libres encadenados.
-     * Retorna el índice del primer bloque o -1 si no hay suficientes.
+     * Renombra un hijo de {@code rutaPadre} si no hay colisión de nombres.
+     * @param rutaPadre
+     * @param nombreActual
+     * @param nuevoNombre
+     * @return true si se renombró; false si ruta inválida, no existe el hijo, o hay colisión.
+     */
+    public boolean renombrar(String rutaPadre, String nombreActual, String nuevoNombre) {
+        Directorio padre = obtenerDirectorioPorRuta(rutaPadre);
+        if (padre == null) return false;
+        if (nuevoNombre == null || nuevoNombre.trim().isEmpty()) return false;
+
+        // Evitar colisión
+        if (padre.obtenerHijoPorNombre(nuevoNombre.trim()) != null) return false;
+
+        NodoSistema objetivo = padre.obtenerHijoPorNombre(nombreActual);
+        if (objetivo == null) return false;
+
+        // Requiere que NodoSistema tenga setNombre(String) (ya lo agregamos).
+        objetivo.setNombre(nuevoNombre.trim());
+        return true;
+    }
+
+    // =========================================================
+    //             ASIGNACIÓN ENCANDENADA (FAT SIMPLE)
+    // =========================================================
+    /**
+     * Asigna 'cantidad' bloques libres encadenados y retorna el índice del primer bloque,
+     * o -1 si no hay suficientes.
      */
     private int asignarCadena(int cantidad) {
-        // buscar bloques libres y encadenarlos
         int anterior = -1;
-        int primero = -1;
-        int encontrados = 0;
+        int primero  = -1;
+        int usados   = 0;
 
-        for (int i = 0; i < disco.obtenerNumeroBloques() && encontrados < cantidad; i++) {
+        for (int i = 0; i < disco.obtenerNumeroBloques() && usados < cantidad; i++) {
             if (disco.obtenerBloque(i).estaLibre()) {
                 if (primero < 0) primero = i;
                 if (anterior >= 0) {
-                    disco.ocuparBloque(anterior, i); // enlazar anterior -> i
+                    // enlazar anterior -> i
+                    disco.ocuparBloque(anterior, i);
                 }
+                // ocupar i (de momento como fin)
+                disco.ocuparBloque(i, Bloque.FIN_CADENA);
                 anterior = i;
-                encontrados++;
-                disco.ocuparBloque(i, Bloque.FIN_CADENA); // marcar ocupado provisionalmente
+                usados++;
             }
         }
-        if (encontrados < cantidad) {
-            // rollback de los que se ocuparon
-            int idx = primero;
-            while (idx >= 0 && idx != Bloque.LIBRE) {
-                int sig = disco.obtenerBloque(idx).getSiguiente();
-                disco.liberarBloque(idx);
-                if (sig == Bloque.FIN_CADENA || sig == Bloque.LIBRE) break;
-                idx = sig;
-            }
+
+        if (usados < cantidad) {
+            // rollback de lo que se alcanzó a ocupar
+            liberarCadena(primero);
             return -1;
         }
         return primero;
     }
 
-    /** Libera toda la cadena a partir del primer bloque. */
+  
     private void liberarCadena(int primerBloque) {
         int idx = primerBloque;
         while (idx >= 0) {
             int sig = disco.obtenerBloque(idx).getSiguiente();
             disco.liberarBloque(idx);
-            if (sig == Bloque.FIN_CADENA || sig == Bloque.LIBRE) {
-                break;
-            }
+            if (sig == Bloque.FIN_CADENA || sig == Bloque.LIBRE) break;
             idx = sig;
         }
     }

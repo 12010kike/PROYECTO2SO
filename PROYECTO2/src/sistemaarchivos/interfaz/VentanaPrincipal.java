@@ -7,12 +7,8 @@ import sistemaarchivos.constantes.constantes;
 import sistemaarchivos.modelo.ModoUsuario;
 import sistemaarchivos.Planificacion.PoliticaPlanificacion;
 import javax.swing.*;
-import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.awt.event.ActionEvent;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
-import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -24,7 +20,6 @@ import sistemaarchivos.EntradaSalida.SolicitudES;
 import sistemaarchivos.EntradaSalida.TipoOperacionesES;
 import sistemaarchivos.disco.Bloque;
 import sistemaarchivos.disco.Disco;
-import sistemaarchivos.modelo.NodoArbolVista;
 import sistemaarchivos.persistencia.PersistenciaJSON;
 import sistemaarchivos.sistema.Archivo;
 import sistemaarchivos.sistema.Directorio;
@@ -186,7 +181,7 @@ public class VentanaPrincipal extends JFrame {
         btnVerificar.addActionListener(this::accionVerificarAsignacion);
         btnExportCSV.addActionListener(this::accionExportarCSV);
 
-        // Timer UI (ahora usa el estado real del hilo)
+        // Timer UI (ahora también sincroniza botones Iniciar/Detener)
         new Timer(400, e -> {
             modeloColaES.actualizarDesdeGestor(gestorES);
             String estado = gestorES.estaEjecutando() ? "activa" : "detenida";
@@ -196,6 +191,10 @@ public class VentanaPrincipal extends JFrame {
                 + " | Espera prom.: " + gestorES.getEsperaPromedioMs() + " ms"
                 + " | Atendidas: " + gestorES.getSolicitudesAtendidas()
             );
+            // NUEVO: sincroniza botones siempre según estado real
+            boolean run = gestorES.estaEjecutando();
+            btnIniciarESRef.setEnabled(!run);
+            btnDetenerESRef.setEnabled(run);
         }).start();
     }
 

@@ -32,4 +32,10 @@ public abstract class NodoSistema {
     public void renombrar(String nuevoNombre) {
         this.nombre = nuevoNombre;
     }
+     public void setNombre(String nuevo) {
+        if (nuevo == null) return;
+        String limpio = nuevo.trim();
+        if (!limpio.isEmpty()) this.nombre = limpio;
+    }
 }
+
