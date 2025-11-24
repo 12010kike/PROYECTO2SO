@@ -325,19 +325,25 @@ public class VentanaPrincipal extends JFrame {
     }
 
     private void accionDetenerES() {
-        gestorES.detener();
+         // 1) detener el hilo
+    gestorES.detener();
 
-        // Refrescar estado visible de inmediato
-        String estado = gestorES.estaEjecutando() ? "activa" : "detenida";
-        etiquetaMetricas.setText(
-            "E/S: " + estado
-            + " | Recorrido: " + gestorES.getRecorridoTotal()
-            + " | Espera prom.: " + gestorES.getEsperaPromedioMs() + " ms"
-            + " | Atendidas: " + gestorES.getSolicitudesAtendidas()
-        );
+    // 2) limpiar métricas y cola (si quieres conservar la cola, pon false)
+    gestorES.resetEstadisticas(true);
 
-        btnIniciarESRef.setEnabled(true);
-        btnDetenerESRef.setEnabled(false);
+    // 3) refrescar tabla de la cola y barra de estado
+    modeloColaES.actualizarDesdeGestor(gestorES);
+
+    etiquetaMetricas.setText(
+        "E/S: detenida"
+        + " | Recorrido: " + gestorES.getRecorridoTotal()
+        + " | Espera prom.: " + gestorES.getEsperaPromedioMs() + " ms"
+        + " | Atendidas: " + gestorES.getSolicitudesAtendidas()
+    );
+
+    // 4) botones
+    btnIniciarESRef.setEnabled(true);
+    btnDetenerESRef.setEnabled(false);
     }
 
     // -------------------- Utilidades --------------------

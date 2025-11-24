@@ -84,6 +84,19 @@ public final class GestorES {
     public long getEsperaPromedioMs()     { return (solicitudesAtendidas == 0) ? 0 : (esperaAcumuladaMs / solicitudesAtendidas); }
     public int  getPosicionCabezal()      { return posicionCabezal; }
     public PoliticaPlanificacion getPolitica() { return politica; }
+    /** Reinicia métricas y (opcional) limpia la cola.
+     * @param limpiarCola */
+    public void resetEstadisticas(boolean limpiarCola) {
+    synchronized (candadoCola) {
+        if (limpiarCola) {
+            while (!cola.estaVacia()) { cola.retirar(); }
+        }
+    }
+    recorridoTotal = 0L;
+    solicitudesAtendidas = 0L;
+    esperaAcumuladaMs = 0L;
+}
+
 
     /** ¿El hilo está corriendo? Úsalo para la UI.
      * @return  */
